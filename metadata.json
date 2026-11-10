@@ -1,0 +1,10 @@
+{
+  "name": "ANINDA - Telefonunuz Sizin Kulağınız",
+  "description": "İşitme kaybı yaşayan bireyler için çevredeki konuşmaları ve önemli sesleri görsel ve yazılı bilgilere dönüştüren yapay zekâ destekli işitsel farkındalık prototipi.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

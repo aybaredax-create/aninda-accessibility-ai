@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      // Ignore WebSocket / HMR connection errors in iframe environment
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event && event.reason;
+        var msg = (reason && (reason.message || reason.stack || String(reason))) || '';
+        if (msg.includes('WebSocket') || msg.includes('ws') || msg.includes('@vite/client') || msg.includes('without opened')) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      }, true);
+      window.addEventListener('error', function(event) {
+        var msg = (event && (event.message || '')) || '';
+        var filename = (event && event.filename) || '';
+        if (msg.includes('WebSocket') || filename.includes('@vite/client') || msg.includes('without opened')) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return true;
+        }
+      }, true);
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ANINDA - Telefonunuz Sizin Kulağınız</title>
+    <meta name="description" content="İşitme kaybı yaşayan bireyler için çevredeki konuşmaları ve önemli sesleri görsel ve yazılı bilgilere dönüştüren yapay zekâ destekli işitsel farkındalık prototipi." />
+    <meta property="og:title" content="ANINDA - Telefonunuz Sizin Kulağınız" />
+    <meta property="og:description" content="İşitme kaybı yaşayan bireyler için çevredeki konuşmaları ve önemli sesleri görsel ve yazılı bilgilere dönüştüren yapay zekâ destekli işitsel farkındalık prototipi." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
