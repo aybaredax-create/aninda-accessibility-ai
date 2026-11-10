@@ -3,24 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Mic,
   MicOff,
-  Radio,
+  Sun,
+  Moon,
+  Type,
+  Vibrate,
   AlertTriangle,
-  Sparkles,
-  Volume2,
-  Clock,
-  Layers,
-  MessageSquare,
-  ChevronRight,
-  ShieldAlert,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 import {
   SoundEvent,
-  UIState,
   MicStatus,
   SpeechSentence,
   SoundPriority,
@@ -33,24 +30,41 @@ import { speechService } from './services/speechService';
 import {
   SOUND_DEFINITIONS,
   SoundDefinition,
-  INITIAL_TIMELINE_EVENTS,
-  DAILY_SCENARIOS,
-  ScenarioItem,
 } from './data/scenarios';
+import { ConversationChat, ChatMessage } from './components/ConversationChat';
 
-import { TopBar } from './components/TopBar';
-import { AudioWaveform } from './components/AudioWaveform';
-import { NeedSearchInput } from './components/NeedSearchInput';
-import { LiveSpeechView } from './components/LiveSpeechView';
-import { SoundTimeline } from './components/SoundTimeline';
-import { DemoSoundBoard } from './components/DemoSoundBoard';
-import { HighPriorityAlert } from './components/HighPriorityAlert';
-import { ScenariosSection } from './components/ScenariosSection';
-import { HowItWorksSection } from './components/HowItWorksSection';
-import { AboutSection } from './components/AboutSection';
+const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
+  {
+    id: 'init-1',
+    time: '14:32',
+    sender: 'other',
+    text: 'Merhaba, nasılsın?',
+  },
+  {
+    id: 'init-2',
+    time: '14:33',
+    sender: 'sound',
+    icon: '🔔',
+    text: 'Kapı zili algılandı',
+  },
+  {
+    id: 'init-3',
+    time: '14:35',
+    sender: 'other',
+    text: 'Arkadaşın: Bugün nereye gidelim?',
+  },
+  {
+    id: 'init-4',
+    time: '14:37',
+    sender: 'sound',
+    icon: '🚨',
+    text: 'Siren algılandı',
+    isHighPriority: true,
+  },
+];
 
 export default function App() {
-  // Theme & Accessibility States
+  // Theme & Accessibility
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -60,32 +74,20 @@ export default function App() {
   const [isLargeFont, setIsLargeFont] = useState(false);
   const [hapticEnabled, setHapticEnabled] = useState(true);
 
-  // Core App States
-  const [uiState, setUiState] = useState<UIState>('READY');
+  // Core App & Microphone Status
   const [micStatus, setMicStatus] = useState<MicStatus>('ready');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Audio Metrics State
-  const [audioMetrics, setAudioMetrics] = useState<AudioMetrics>({
-    volumePercent: 0,
-    decibel: 35,
-    frequencyData: new Uint8Array(128),
-  });
+  // Active Detected Sound Focus
+  const [activeSound, setActiveSound] = useState<SoundEvent | null>(null);
+  const [liveSpeechText, setLiveSpeechText] = useState<string>('');
+  const [showDemoDrawer, setShowDemoDrawer] = useState(false);
 
-  // Speech Recognition States
-  const [speechSupported, setSpeechSupported] = useState(true);
-  const [interimSpeech, setInterimSpeech] = useState<string>('');
-  const [speechList, setSpeechList] = useState<SpeechSentence[]>([]);
+  // Chat & Text-to-Speech State
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(INITIAL_CHAT_MESSAGES);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
-  // Sound Timeline & Latest Event
-  const [timelineEvents, setTimelineEvents] = useState<SoundEvent[]>(INITIAL_TIMELINE_EVENTS);
-  const [latestSound, setLatestSound] = useState<SoundEvent | null>(INITIAL_TIMELINE_EVENTS[0] || null);
-  const [activeHighPriorityAlert, setActiveHighPriorityAlert] = useState<SoundEvent | null>(null);
-
-  // Active view tab in listening mode: 'timeline' | 'speech' | 'demo'
-  const [activeTab, setActiveTab] = useState<'timeline' | 'speech' | 'demo'>('timeline');
-
-  // Sync dark mode class on HTML element
+  // Sync dark theme class on HTML element
   useEffect(() => {
     const root = document.documentElement;
     if (isDarkMode) {
@@ -95,12 +97,7 @@ export default function App() {
     }
   }, [isDarkMode]);
 
-  // Check speech recognition capability on mount
-  useEffect(() => {
-    setSpeechSupported(speechService.isSupported());
-  }, []);
-
-  // Trigger haptic vibration if supported and enabled
+  // Haptic feedback trigger
   const triggerHaptic = useCallback(
     (pattern: number | number[]) => {
       if (!hapticEnabled) return;
@@ -113,61 +110,105 @@ export default function App() {
     [hapticEnabled]
   );
 
-  // Format current time HH:MM
   const getCurrentTimeStr = () => {
-    const now = new Date();
-    return now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+    return new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Add event to timeline
-  const addSoundEvent = useCallback(
-    (event: Omit<SoundEvent, 'id' | 'time' | 'fullDate'>) => {
+  // Add Sound Event and append to chat history
+  const displaySound = useCallback(
+    (sound: Omit<SoundEvent, 'id' | 'time' | 'fullDate'>) => {
       const now = new Date();
       const timeStr = getCurrentTimeStr();
       const newEvent: SoundEvent = {
-        ...event,
-        id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        ...sound,
+        id: `evt-${Date.now()}`,
         time: timeStr,
         fullDate: now,
       };
 
-      setTimelineEvents((prev) => [newEvent, ...prev]);
-      setLatestSound(newEvent);
+      setActiveSound(newEvent);
+
+      // Append sound to conversation history
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: `chat-snd-${Date.now()}`,
+          time: timeStr,
+          sender: sound.category === 'SPEECH' ? 'other' : 'sound',
+          text: sound.category === 'SPEECH' ? sound.detail || sound.title : `${sound.title}`,
+          icon: sound.icon,
+          isHighPriority: sound.category === 'HIGH_PRIORITY',
+        },
+      ]);
 
       if (newEvent.category === 'HIGH_PRIORITY') {
-        setUiState('HIGH_PRIORITY');
-        setActiveHighPriorityAlert(newEvent);
-        triggerHaptic([300, 100, 300, 100, 500]); // Strong urgent vibration pattern
+        triggerHaptic([300, 100, 300, 100, 500]);
       } else {
-        setUiState('DETECTED');
-        triggerHaptic(120); // Subtle awareness vibration
-        // Return to LISTENING state after brief feedback
-        setTimeout(() => {
-          setUiState((current) => (current === 'DETECTED' ? 'LISTENING' : current));
-        }, 2000);
+        triggerHaptic(120);
       }
     },
     [triggerHaptic]
   );
 
-  // Real Microphone Activation (ANINDA AKTİF ET)
+  // Text-to-Speech: Read out text aloud for the user to communicate with others
+  const handleSpeakText = (text: string) => {
+    const clean = text.trim();
+    if (!clean) return;
+
+    const timeStr = getCurrentTimeStr();
+
+    // 1. Add to chat history as user's voiced message
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: `chat-me-${Date.now()}`,
+        time: timeStr,
+        sender: 'me',
+        text: clean,
+      },
+    ]);
+
+    // 2. Speak aloud with Web Speech API SpeechSynthesis
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(clean);
+        utterance.lang = 'tr-TR';
+        utterance.rate = 0.95;
+
+        // Try to pick a Turkish voice if available
+        const voices = window.speechSynthesis.getVoices();
+        const trVoice = voices.find((v) => v.lang.toLowerCase().includes('tr'));
+        if (trVoice) {
+          utterance.voice = trVoice;
+        }
+
+        setIsSpeaking(true);
+        utterance.onend = () => setIsSpeaking(false);
+        utterance.onerror = () => setIsSpeaking(false);
+
+        window.speechSynthesis.speak(utterance);
+      } catch (err) {
+        console.warn('SpeechSynthesis error:', err);
+        setIsSpeaking(false);
+      }
+    }
+  };
+
+  // Start Listening
   const handleStartListening = async () => {
     setErrorMessage(null);
-    setUiState('PROCESSING');
 
-    // 1. Start Web Audio API stream
     const audioResult = await audioService.requestMicrophone(
-      (metrics) => {
-        setAudioMetrics(metrics);
-      },
+      () => {},
       (peakDb) => {
-        // Sudden loud peak detected via real microphone!
-        addSoundEvent({
+        displaySound({
           type: 'unknown_loud',
           category: 'IMPORTANT',
-          title: 'Yüksek Ses Seviyesi Algılandı',
+          title: 'YÜKSEK SES ALGILANDI',
           icon: '⚠️',
-          detail: `Mikrofon ani ${peakDb} dB ses dalgalanması yakaladı.`,
+          proximity: 'Yakın çevrenizde',
+          detail: 'Belirgin ses yükselişi tespit edildi.',
           isDemo: false,
           decibel: peakDb,
         });
@@ -176,47 +217,45 @@ export default function App() {
 
     if (!audioResult.success) {
       setMicStatus('denied');
-      setUiState('ERROR');
       setErrorMessage(audioResult.error || 'Mikrofon başlatılamadı.');
       return;
     }
 
     setMicStatus('active');
-    setUiState('LISTENING');
 
-    // 2. Start Live Speech Recognition if supported
+    // Start Web Speech API if supported
     if (speechService.isSupported()) {
       speechService.start(
         (interim) => {
-          setInterimSpeech(interim);
+          setLiveSpeechText(interim);
+          if (interim) {
+            setActiveSound({
+              id: `interim-${Date.now()}`,
+              time: getCurrentTimeStr(),
+              fullDate: new Date(),
+              type: 'speech',
+              category: 'SPEECH',
+              title: 'KONUŞMA ALGILANDI',
+              icon: '💬',
+              proximity: 'Yakın çevrenizde',
+              detail: interim,
+              isDemo: false,
+            });
+          }
         },
         (final) => {
-          setInterimSpeech('');
-          const timeStr = getCurrentTimeStr();
-          const newSpeech: SpeechSentence = {
-            id: `speech-${Date.now()}`,
-            text: final,
-            time: timeStr,
-            isFinal: true,
-          };
-          setSpeechList((prev) => [...prev, newSpeech]);
-
-          // Also record speech to main sound timeline
-          addSoundEvent({
+          setLiveSpeechText(final);
+          displaySound({
             type: 'speech',
             category: 'SPEECH',
-            title: 'Konuşma Algılandı',
+            title: 'KONUŞMA ALGILANDI',
             icon: '💬',
+            proximity: 'Yakın çevrenizde',
             detail: final,
             isDemo: false,
-            decibel: 65,
           });
         },
-        (status, isErr) => {
-          if (isErr) {
-            console.warn('Speech warning:', status);
-          }
-        }
+        () => {}
       );
     }
   };
@@ -226,111 +265,35 @@ export default function App() {
     audioService.stop();
     speechService.stop();
     setMicStatus('stopped');
-    setUiState('STOPPED');
-    setInterimSpeech('');
-    setAudioMetrics({
-      volumePercent: 0,
-      decibel: 30,
-      frequencyData: new Uint8Array(128),
-    });
+    setLiveSpeechText('');
   };
 
-  // Trigger Demo Sound Event
-  const handleTriggerDemoSound = (soundDef: SoundDefinition) => {
-    addSoundEvent({
+  // Trigger Demo Sound
+  const handleTriggerDemo = (soundDef: SoundDefinition) => {
+    displaySound({
       type: soundDef.type,
       category: soundDef.category,
       title: soundDef.title,
       icon: soundDef.icon,
+      proximity: soundDef.proximity,
       detail: soundDef.description,
       isDemo: true,
       decibel: soundDef.defaultDecibel,
     });
   };
 
-  // Trigger Daily Scenario
-  const handleTriggerScenario = (scenario: ScenarioItem) => {
-    if (scenario.simulatedSound === 'speech' && scenario.sampleTranscript) {
-      const timeStr = getCurrentTimeStr();
-      setSpeechList((prev) => [
-        ...prev,
-        {
-          id: `sc-speech-${Date.now()}`,
-          text: scenario.sampleTranscript!,
-          time: timeStr,
-          isFinal: true,
-        },
-      ]);
-      addSoundEvent({
-        type: 'speech',
-        category: 'SPEECH',
-        title: scenario.triggerText,
-        icon: scenario.icon,
-        detail: scenario.sampleTranscript,
-        isDemo: true,
-        decibel: 66,
-      });
-      setActiveTab('speech');
-    } else {
-      const matched = SOUND_DEFINITIONS.find((s) => s.type === scenario.simulatedSound);
-      if (matched) {
-        addSoundEvent({
-          type: matched.type,
-          category: matched.category,
-          title: matched.title,
-          icon: matched.icon,
-          detail: scenario.actionText,
-          isDemo: true,
-          decibel: matched.defaultDecibel,
-        });
-      }
-    }
-
-    // Smooth scroll to active area
-    const el = document.getElementById('active-area');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  // Route user natural language need
-  const handleRouteNeed = (
-    target: 'speech' | 'timeline' | 'alerts' | 'demo',
-    explanation?: string
-  ) => {
-    if (target === 'speech') {
-      setActiveTab('speech');
-    } else if (target === 'demo') {
-      setActiveTab('demo');
-    } else {
-      setActiveTab('timeline');
-    }
-
-    const el = document.getElementById('active-area');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  const handleSimulateSpeech = (text: string) => {
-    const timeStr = getCurrentTimeStr();
-    setSpeechList((prev) => [
-      ...prev,
-      {
-        id: `sim-speech-${Date.now()}`,
-        text,
-        time: timeStr,
-        isFinal: true,
-      },
-    ]);
-    addSoundEvent({
+  // Demo speech trigger
+  const handleDemoSpeech = () => {
+    const sample = 'Arkadaşın: Bugün saat 8’de buluşalım.';
+    setLiveSpeechText(sample);
+    displaySound({
       type: 'speech',
       category: 'SPEECH',
-      title: 'Konuşma Algılandı (Demo)',
+      title: 'KONUŞMA ALGILANDI',
       icon: '💬',
-      detail: text,
+      proximity: 'Yakın çevrenizde',
+      detail: sample,
       isDemo: true,
-      decibel: 65,
     });
   };
 
@@ -338,355 +301,289 @@ export default function App() {
 
   return (
     <div
-      className={`min-h-screen bg-[#FBFBFC] dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors ${
+      className={`min-h-screen bg-[#FDFDFD] dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors flex flex-col justify-between ${
         isLargeFont ? 'text-lg' : 'text-base'
       }`}
     >
-      {/* High Priority Emergency Overlay Alert */}
-      <HighPriorityAlert
-        alert={activeHighPriorityAlert}
-        onDismiss={() => setActiveHighPriorityAlert(null)}
-      />
+      {/* Ultra-Minimal Header */}
+      <header className="w-full px-6 py-4 flex items-center justify-between border-b border-slate-100 dark:border-slate-900">
+        <div className="flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-full bg-teal-600 inline-block" />
+          <span className="font-extrabold tracking-tight text-lg sm:text-xl text-slate-900 dark:text-white">
+            ANINDA
+          </span>
+        </div>
 
-      {/* Top Bar (§2 Top Bar Contract) */}
-      <TopBar
-        isDarkMode={isDarkMode}
-        onToggleTheme={() => setIsDarkMode(!isDarkMode)}
-        isLargeFont={isLargeFont}
-        onToggleFontSize={() => setIsLargeFont(!isLargeFont)}
-        hapticEnabled={hapticEnabled}
-        onToggleHaptic={() => setHapticEnabled(!hapticEnabled)}
-        onNavigate={(id) => {
-          const el = document.getElementById(id);
-          if (el) el.scrollIntoView({ behavior: 'smooth' });
-        }}
-      />
+        {/* Quiet Accessibility & Theme Controls */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setHapticEnabled(!hapticEnabled)}
+            title={hapticEnabled ? 'Titreşim açık' : 'Titreşim kapalı'}
+            aria-label="Titreşim bildirimi geçişi"
+            className={`min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center transition-colors cursor-pointer ${
+              hapticEnabled
+                ? 'text-teal-600 dark:text-teal-400'
+                : 'text-slate-400 dark:text-slate-600'
+            }`}
+          >
+            <Vibrate className="w-4 h-4" />
+          </button>
+
+          <button
+            onClick={() => setIsLargeFont(!isLargeFont)}
+            title={isLargeFont ? 'Normal yazı' : 'Büyük yazı'}
+            aria-label="Yazı boyutu değiştir"
+            className="min-h-[44px] min-w-[44px] rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center justify-center font-bold text-xs cursor-pointer"
+          >
+            <Type className="w-4 h-4 mr-0.5" />
+            <span>{isLargeFont ? 'A+' : 'A'}</span>
+          </button>
+
+          <button
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            title={isDarkMode ? 'Açık mod' : 'Koyu mod'}
+            aria-label="Tema değiştir"
+            className="min-h-[44px] min-w-[44px] rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center justify-center cursor-pointer"
+          >
+            {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
+          </button>
+        </div>
+      </header>
 
       {/* Main Content Area */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
-        {/* HERO SECTION: Singular, Powerful, Focused Experience */}
-        <section id="hero" className="max-w-3xl mx-auto text-center mb-8">
-          <h1 className="text-4xl sm:text-6xl font-black tracking-tight text-slate-950 dark:text-white leading-none">
-            ANINDA
-          </h1>
-          <p className="mt-3 text-xl sm:text-2xl font-bold text-teal-600 dark:text-teal-400 tracking-tight">
-            “Telefonunuz sizin kulağınız.”
-          </p>
-          <p className="mt-3 text-sm sm:text-base text-slate-600 dark:text-slate-300 max-w-xl mx-auto leading-relaxed">
-            Çevrenizdeki konuşmaları ve önemli sesleri algılayın, anlamlandırın ve ekranda görün.
-          </p>
-
-          {/* Singular Primary CTA Button with Maximum Hierarchy */}
-          <div className="mt-8 flex flex-col items-center justify-center">
-            {isListening ? (
-              <button
-                onClick={handleStopListening}
-                className="w-full sm:w-auto px-8 py-5 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-lg sm:text-xl shadow-xl shadow-rose-600/20 active:scale-95 transition-all flex items-center justify-center gap-3 cursor-pointer ring-4 ring-rose-500/20"
-                aria-label="Dinlemeyi durdur"
-              >
-                <span className="w-4 h-4 rounded-full bg-white animate-pulse" />
-                <MicOff className="w-6 h-6" />
-                <span>DİNLENMEYİ DURDUR</span>
-              </button>
-            ) : (
-              <button
-                onClick={handleStartListening}
-                className="w-full sm:w-auto px-8 py-5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-lg sm:text-xl shadow-xl shadow-teal-600/25 active:scale-95 transition-all flex items-center justify-center gap-3 cursor-pointer ring-4 ring-teal-500/20"
-                aria-label="ANINDA dinleme modunu başlat"
-              >
-                <span className="w-4 h-4 rounded-full bg-emerald-300 animate-ping" />
-                <Mic className="w-6 h-6" />
-                <span>ANINDA AKTİF ET</span>
-              </button>
-            )}
-
-            {/* Microphone Status Indicator */}
-            <div className="mt-4 flex items-center gap-2 text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300">
-              {micStatus === 'active' && (
-                <span className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Mikrofon aktif · Çevrenizi dinliyorum
-                </span>
-              )}
-              {micStatus === 'ready' && (
-                <span className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
-                  <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
-                  Mikrofon hazır
-                </span>
-              )}
-              {micStatus === 'stopped' && (
-                <span className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
-                  <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
-                  Dinleme durduruldu
-                </span>
-              )}
-              {micStatus === 'denied' && (
-                <span className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                  Mikrofon erişimine izin verilmedi
-                </span>
-              )}
-            </div>
-
-            <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
-              Mikrofon izni yalnızca siz başlattığınızda istenir.
-            </p>
-          </div>
-        </section>
-
-        {/* Microphone Error Banner (if permission denied) */}
+      <main className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 py-6 max-w-xl mx-auto w-full">
+        {/* Error message banner if permission denied */}
         {errorMessage && (
-          <div className="max-w-2xl mx-auto my-4 p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs sm:text-sm flex items-start gap-3">
+          <div className="w-full mb-6 p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs sm:text-sm flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
             <div>
-              <p className="font-bold">Erişim Hatası</p>
+              <p className="font-bold">Mikrofon İzni Gerekli</p>
               <p className="mt-0.5 leading-relaxed">{errorMessage}</p>
-              <p className="mt-1 text-xs opacity-80">
-                Mikrofon izni olmadan da aşağıdaki <strong>Demo Modu</strong> ile tüm sesleri ve özellikleri deneyebilirsiniz.
+              <p className="mt-1 text-xs opacity-75">
+                Tarayıcı adres çubuğundaki kilit simgesine dokunarak mikrofon izni verebilirsiniz.
               </p>
             </div>
           </div>
         )}
 
-        {/* Live Reactive Audio Waveform directly tied to Web Audio API */}
-        <div className="max-w-3xl mx-auto mb-6">
-          <AudioWaveform
-            isListening={isListening}
-            metrics={audioMetrics}
-            isDarkMode={isDarkMode}
-          />
-        </div>
+        {!isListening ? (
+          /* ========================================================= */
+          /* 1. IDLE / ANA EKRAN: Radically minimal, singular focus     */
+          /* ========================================================= */
+          <div className="text-center w-full my-auto py-6">
+            <h1 className="text-4xl sm:text-6xl font-black tracking-tight text-slate-900 dark:text-white">
+              ANINDA
+            </h1>
+            <p className="mt-3 text-xl sm:text-2xl font-bold text-teal-600 dark:text-teal-400 tracking-tight">
+              “Telefonunuz sizin kulağınız.”
+            </p>
 
-        {/* Natural Language Assistant Input ("Şu anda neye ihtiyacın var?") */}
-        <NeedSearchInput onRouteNeed={handleRouteNeed} />
+            {/* Singular Big Action Button */}
+            <div className="mt-8 sm:mt-10 flex flex-col items-center">
+              <button
+                onClick={handleStartListening}
+                className="w-full sm:w-80 py-5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-lg sm:text-xl shadow-xl shadow-teal-600/20 active:scale-95 transition-all flex items-center justify-center gap-3 cursor-pointer"
+                aria-label="ANINDA AKTİF ET"
+              >
+                <span className="w-3.5 h-3.5 rounded-full bg-emerald-300 animate-ping" />
+                <Mic className="w-6 h-6" />
+                <span>ANINDA AKTİF ET</span>
+              </button>
 
-        {/* ACTIVE AREA: Real-time sound awareness radar */}
-        <section id="active-area" className="mt-8 scroll-mt-20">
-          {/* Active Listening Status Card */}
-          {isListening && (
-            <div className="mb-6 p-4 rounded-2xl bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <span className="w-3 h-3 rounded-full bg-teal-500 animate-ping" />
+              <p className="mt-4 text-xs text-slate-400 dark:text-slate-500">
+                Mikrofon izni yalnızca siz başlattığınızda istenir.
+              </p>
+            </div>
+          </div>
+        ) : (
+          /* ========================================================= */
+          /* 2. AKTİF DİNLEME MODU: Displays ONLY detected sound       */
+          /* ========================================================= */
+          <div className="w-full my-auto py-4 flex flex-col items-center">
+            {/* Status indicator */}
+            <div className="flex items-center gap-2 mb-4">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                ANINDA AKTİF · Çevrenizi dinliyorum
+              </span>
+            </div>
+
+            {/* Singular Focal Alert Card */}
+            <div
+              className={`w-full rounded-3xl p-6 sm:p-8 text-center transition-all border ${
+                activeSound?.category === 'HIGH_PRIORITY'
+                  ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-950 dark:text-white shadow-xl ring-4 ring-rose-500/20'
+                  : activeSound?.category === 'IMPORTANT'
+                  ? 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-300/80 dark:border-amber-800/80 text-amber-950 dark:text-white shadow-md'
+                  : activeSound?.category === 'SPEECH'
+                  ? 'bg-sky-50/70 dark:bg-sky-950/30 border-sky-300/80 dark:border-sky-800/80 text-slate-900 dark:text-white shadow-md'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-sm'
+              }`}
+            >
+              {activeSound ? (
                 <div>
-                  <h2 className="text-sm font-bold text-teal-950 dark:text-teal-200">
-                    ANINDA AKTİF
+                  {/* Big Sound Icon */}
+                  <div className="text-6xl sm:text-7xl mb-3 select-none" aria-hidden="true">
+                    {activeSound.icon}
+                  </div>
+
+                  {/* High Priority Badge if applicable */}
+                  {activeSound.category === 'HIGH_PRIORITY' && (
+                    <span className="inline-block px-3 py-1 mb-2 text-xs font-black tracking-widest uppercase bg-rose-600 text-white rounded-md">
+                      YÜKSEK ÖNCELİK
+                    </span>
+                  )}
+
+                  {/* Large Sound Title */}
+                  <h2 className="text-2xl sm:text-3xl font-black tracking-tight leading-tight uppercase">
+                    {activeSound.title}
                   </h2>
-                  <p className="text-xs text-teal-700 dark:text-teal-300">
-                    Çevrenizi dinliyorum. Konuşmalar ve sesler canlı olarak işleniyor.
-                  </p>
-                </div>
-              </div>
 
-              {latestSound && (
-                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-teal-200 dark:border-teal-800 text-xs">
-                  <span className="text-base">{latestSound.icon}</span>
-                  <span className="font-bold text-slate-800 dark:text-slate-200">
-                    Son: {latestSound.title}
+                  {/* Proximity text (Yakın çevrenizde / Çevrenizde) */}
+                  {activeSound.proximity && (
+                    <p className="mt-1 text-sm font-semibold opacity-80">
+                      {activeSound.proximity}
+                    </p>
+                  )}
+
+                  {/* Spoken text or detail */}
+                  {activeSound.detail && (
+                    <div className="mt-4 p-4 rounded-2xl bg-white/70 dark:bg-slate-950/50 border border-slate-200/50 dark:border-slate-800/60">
+                      <p className="text-base sm:text-lg font-bold leading-relaxed break-words">
+                        “{activeSound.detail}”
+                      </p>
+                    </div>
+                  )}
+
+                  <span className="block mt-3 text-xs font-mono opacity-50">
+                    {activeSound.time}
                   </span>
-                  <span className="font-mono text-slate-400">({latestSound.time})</span>
+                </div>
+              ) : (
+                /* Calm Waiting Pulse */
+                <div className="py-6">
+                  <div className="w-14 h-14 mx-auto rounded-full bg-teal-100 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center mb-3 animate-pulse">
+                    <Mic className="w-7 h-7" />
+                  </div>
+                  <h2 className="text-lg sm:text-xl font-bold text-slate-800 dark:text-slate-200">
+                    Çevredeki sesler bekleniyor...
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                    Sessiz ortam · Biri konuştuğunda veya önemli bir ses duyulduğunda ekranda belirecektir
+                  </p>
                 </div>
               )}
             </div>
-          )}
 
-          {/* High Priority Sound Highlight (Section 12: En son algılanan önemli ses üstte büyük gösterilmeli) */}
-          {latestSound && latestSound.category === 'HIGH_PRIORITY' && (
-            <div className="mb-6 p-5 sm:p-6 rounded-3xl bg-rose-50 dark:bg-rose-950/30 border-2 border-rose-300 dark:border-rose-800 flex items-center justify-between gap-4 shadow-sm">
-              <div className="flex items-center gap-4">
-                <span className="text-4xl select-none" aria-hidden="true">
-                  {latestSound.icon}
-                </span>
-                <div>
-                  <span className="text-[11px] font-black uppercase tracking-wider text-rose-700 dark:text-rose-300">
-                    EN SON ALGILANAN ÖNEMLİ SES
-                  </span>
-                  <h3 className="text-xl sm:text-2xl font-black text-rose-950 dark:text-rose-100 leading-tight">
-                    {latestSound.title.toUpperCase()}
-                  </h3>
-                  <p className="text-xs sm:text-sm text-rose-800 dark:text-rose-200 mt-1">
-                    {latestSound.detail}
-                  </p>
-                </div>
-              </div>
-              <div className="text-right">
-                <span className="font-mono tabular-nums text-lg font-bold text-rose-900 dark:text-rose-200">
-                  {latestSound.time}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Section Navigation Tabs for Ergonomic Switching */}
-          <div className="flex items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-2 mb-6 overflow-x-auto">
-            <div className="flex items-center gap-1.5">
+            {/* Stop Action Button */}
+            <div className="mt-6 w-full flex flex-col items-center">
               <button
-                onClick={() => setActiveTab('timeline')}
-                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
-                  activeTab === 'timeline'
-                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
+                onClick={handleStopListening}
+                className="w-full sm:w-80 py-4 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-base sm:text-lg shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                aria-label="Dinlemeyi durdur"
               >
-                <Clock className="w-4 h-4" />
-                <span>ANINDA SES AKIŞI ({timelineEvents.length})</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('speech')}
-                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
-                  activeTab === 'speech'
-                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-              >
-                <MessageSquare className="w-4 h-4" />
-                <span>CANLI KONUŞMA ({speechList.length})</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('demo')}
-                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all cursor-pointer ${
-                  activeTab === 'demo'
-                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-              >
-                <Layers className="w-4 h-4" />
-                <span>SES SİMÜLASYONU & DEMO</span>
+                <MicOff className="w-5 h-5" />
+                <span>DİNLENMEYİ DURDUR</span>
               </button>
             </div>
           </div>
+        )}
 
-          {/* Active View Container */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-8">
-              {activeTab === 'timeline' && (
-                <SoundTimeline
-                  events={timelineEvents}
-                  onClearEvents={() => setTimelineEvents([])}
-                  onSelectEvent={(evt) => {
-                    if (evt.category === 'HIGH_PRIORITY') {
-                      setActiveHighPriorityAlert(evt);
-                    }
-                  }}
-                />
-              )}
+        {/* ========================================================= */}
+        {/* SOHBET GEÇMİŞİ & YAZILANI SESLENDİRME (Yeni 2 Özellik)     */}
+        {/* ========================================================= */}
+        <ConversationChat
+          messages={chatMessages}
+          onSendMessage={handleSpeakText}
+          isSpeaking={isSpeaking}
+        />
 
-              {activeTab === 'speech' && (
-                <LiveSpeechView
-                  isListening={isListening}
-                  speechSupported={speechSupported}
-                  sentences={speechList}
-                  interimText={interimSpeech}
-                  onClearSpeech={() => setSpeechList([])}
-                  onSimulateSpeech={handleSimulateSpeech}
-                />
-              )}
+        {/* ========================================================= */}
+        {/* QUICK DEMO TESTER (Discrete drawer for testing sounds)    */}
+        {/* ========================================================= */}
+        <div className="w-full mt-4 pt-4 border-t border-slate-100 dark:border-slate-900">
+          <button
+            onClick={() => setShowDemoDrawer(!showDemoDrawer)}
+            className="w-full py-2 text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <span>Örnek Sesleri Test Et (Demo)</span>
+            {showDemoDrawer ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
 
-              {activeTab === 'demo' && (
-                <DemoSoundBoard
-                  onTriggerSound={handleTriggerDemoSound}
-                  isListening={isListening}
-                />
-              )}
-            </div>
-
-            {/* Sidebar View for Multi-Column Balance on Desktop */}
-            <div className="lg:col-span-4 space-y-6">
-              {/* Quick Status / Assistant Card */}
-              <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Sistem Durumu
-                  </span>
-                  <span className="font-mono text-xs text-slate-400 tabular-nums">
-                    {getCurrentTimeStr()}
-                  </span>
-                </div>
-
-                <div className="space-y-3 text-xs sm:text-sm">
-                  <div className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-800">
-                    <span className="text-slate-600 dark:text-slate-400">Arayüz Durumu</span>
-                    <span className="font-bold text-teal-600 dark:text-teal-400">
-                      {uiState === 'READY' && 'Dinlemeye Hazır'}
-                      {uiState === 'LISTENING' && 'Çevreyi Dinliyor'}
-                      {uiState === 'PROCESSING' && 'Ses Analiz Ediliyor'}
-                      {uiState === 'DETECTED' && 'Ses Algılandı'}
-                      {uiState === 'HIGH_PRIORITY' && 'Yüksek Öncelikli Ses!'}
-                      {uiState === 'STOPPED' && 'Dinleme Durduruldu'}
-                      {uiState === 'ERROR' && 'Bağlantı Hatası'}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-800">
-                    <span className="text-slate-600 dark:text-slate-400">Canlı Mikrofon</span>
-                    <span className="font-bold">
-                      {isListening ? 'Aktif (Web Audio)' : 'Kapalı'}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-800">
-                    <span className="text-slate-600 dark:text-slate-400">Konuşma Tanıma</span>
-                    <span className="font-bold">
-                      {speechSupported ? 'Destekleniyor (tr-TR)' : 'Demo Modu Aktif'}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between py-2">
-                    <span className="text-slate-600 dark:text-slate-400">Titreşim Bildirimi</span>
-                    <span className="font-bold">{hapticEnabled ? 'Açık' : 'Kapalı'}</span>
-                  </div>
-                </div>
-
-                {/* Quick actions inside sidebar */}
-                <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-col gap-2">
+          {showDemoDrawer && (
+            <div className="mt-2.5 p-3 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800">
+              <div className="flex flex-wrap items-center justify-center gap-1.5">
+                <button
+                  onClick={handleDemoSpeech}
+                  className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 text-xs font-bold border border-slate-200 dark:border-slate-700 hover:border-teal-500 transition-colors cursor-pointer"
+                >
+                  💬 Konuşma
+                </button>
+                {SOUND_DEFINITIONS.slice(0, 7).map((s) => (
                   <button
-                    onClick={() => {
-                      // Trigger emergency demo test
-                      const siren = SOUND_DEFINITIONS.find((s) => s.type === 'siren');
-                      if (siren) handleTriggerDemoSound(siren);
-                    }}
-                    className="w-full px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 text-rose-700 dark:text-rose-300 text-xs font-bold transition-colors cursor-pointer flex items-center justify-between"
+                    key={s.type}
+                    onClick={() => handleTriggerDemo(s)}
+                    className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 text-xs font-bold border border-slate-200 dark:border-slate-700 hover:border-teal-500 transition-colors cursor-pointer"
                   >
-                    <span>🚨 Acil Durum Uyarısını Test Et</span>
-                    <ChevronRight className="w-4 h-4" />
+                    {s.icon} {s.title.replace(' ALGILANDI', '').replace(' ÇALIYOR', '')}
                   </button>
-
-                  <button
-                    onClick={() => {
-                      const doorbell = SOUND_DEFINITIONS.find((s) => s.type === 'doorbell');
-                      if (doorbell) handleTriggerDemoSound(doorbell);
-                    }}
-                    className="w-full px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 text-amber-800 dark:text-amber-300 text-xs font-bold transition-colors cursor-pointer flex items-center justify-between"
-                  >
-                    <span>🔔 Kapı Zili Algısını Test Et</span>
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Quick Academic Identity Box */}
-              <div className="p-5 rounded-3xl bg-teal-50/60 dark:bg-teal-950/30 border border-teal-200/80 dark:border-teal-800 text-xs text-teal-900 dark:text-teal-200">
-                <span className="font-extrabold block text-sm mb-1 text-teal-950 dark:text-teal-100">
-                  Sosyal Fayda Prototipi
-                </span>
-                <p className="leading-relaxed text-teal-800 dark:text-teal-300">
-                  Bu uygulama üniversite dersi kapsamında geliştirilen işitsel farkındalık sistemidir. Çevresel sesler renk, simge ve metinle anında fark edilebilir hale gelir.
-                </p>
+                ))}
               </div>
             </div>
-          </div>
-        </section>
-
-        {/* GÜNLÜK HAYAT SENARYOLARI (Section 13) */}
-        <ScenariosSection onTriggerScenario={handleTriggerScenario} />
-
-        {/* NASIL ÇALIŞIR? (Section 14) */}
-        <HowItWorksSection />
-
-        {/* SOSYAL FAYDA & HAKKINDA (Sections 15, 24, 25) */}
-        <AboutSection />
+          )}
+        </div>
       </main>
+
+      {/* ========================================================= */}
+      {/* 3. ÇOK AZ BİLGİLENDİRME (Radically simplified info area)   */}
+      {/* ========================================================= */}
+      <footer className="w-full border-t border-slate-100 dark:border-slate-900 bg-slate-50/50 dark:bg-slate-950/60 px-6 py-6">
+        <div className="max-w-xl mx-auto text-center">
+          <h3 className="text-xs font-black uppercase tracking-wider text-teal-600 dark:text-teal-400 mb-1.5">
+            ANINDA NASIL ÇALIŞIR?
+          </h3>
+
+          <div className="py-1.5 flex items-center justify-center gap-2 text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-200 font-mono">
+            <span>SES</span>
+            <span className="text-teal-500">→</span>
+            <span>MİKROFON</span>
+            <span className="text-teal-500">→</span>
+            <span>YAPAY ZEKÂ</span>
+            <span className="text-teal-500">→</span>
+            <span>GÖRSEL BİLGİ</span>
+          </div>
+
+          <p className="mt-1.5 text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+            ANINDA, çevrenizdeki konuşmaları ve önemli çevresel sesleri algılayarak bunları sizin için görsel ve yazılı bilgilere dönüştürmeyi amaçlayan yapay zekâ destekli bir erişilebilirlik prototipidir.
+          </p>
+
+          {/* Simple daily life examples (no card clutter) */}
+          <div className="mt-3 pt-3 border-t border-slate-200/60 dark:border-slate-800 text-left text-xs text-slate-600 dark:text-slate-400 space-y-1.5 max-w-md mx-auto">
+            <p className="flex items-center gap-2">
+              <span className="text-teal-600 font-bold">•</span>
+              <span><strong>Arkadaşlarınız konuşuyor</strong> → konuşmayı metne dönüştürür.</span>
+            </p>
+            <p className="flex items-center gap-2">
+              <span className="text-teal-600 font-bold">•</span>
+              <span><strong>Kapı zili çalıyor</strong> → kapı zili bildirimi gösterir.</span>
+            </p>
+            <p className="flex items-center gap-2">
+              <span className="text-rose-600 font-bold">•</span>
+              <span><strong>Siren duyuluyor</strong> → yüksek öncelikli uyarı gösterir.</span>
+            </p>
+            <p className="flex items-center gap-2">
+              <span className="text-teal-600 font-bold">•</span>
+              <span><strong>Köpek havlıyor</strong> → köpek havlaması bildirimi gösterir.</span>
+            </p>
+          </div>
+
+          {/* Academic identity & safety disclaimer */}
+          <div className="mt-4 pt-3 border-t border-slate-200/60 dark:border-slate-800 text-[11px] text-slate-400 dark:text-slate-500 space-y-0.5">
+            <p>Yapay zekâ destekli işitsel farkındalık ve erişilebilir iletişim prototipi.</p>
+            <p>Uygulama tıbbi cihaz veya resmi 112 acil durum sistemlerinin yerine geçmez.</p>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

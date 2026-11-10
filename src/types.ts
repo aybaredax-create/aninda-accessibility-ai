@@ -31,6 +31,7 @@ export interface SoundEvent {
   title: string;
   icon: string;
   detail?: string;
+  proximity?: string; // e.g. "Yakın çevrenizde", "Çevrenizde", "Uzak çevrede"
   isDemo?: boolean;
   decibel?: number;
   acknowledged?: boolean;
