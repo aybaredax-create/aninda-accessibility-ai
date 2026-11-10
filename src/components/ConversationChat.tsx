@@ -174,8 +174,8 @@ export const ConversationChat: React.FC<ConversationChatProps> = ({
           onClick={() => handleSend()}
           disabled={!inputText.trim() || isSpeaking}
           className="min-h-[42px] px-3.5 rounded-2xl bg-teal-600 hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer shrink-0"
-          title="Yazdığınız metni seslendir"
-          aria-label="Yazılanı sesli oku"
+          title="Yazdığınız metni karşı tarafa seslendir"
+          aria-label="Yazılan metni sesli olarak oku"
         >
           <Volume2 className={`w-4 h-4 ${isSpeaking ? 'animate-bounce' : ''}`} />
           <span className="hidden sm:inline">Seslendir</span>
